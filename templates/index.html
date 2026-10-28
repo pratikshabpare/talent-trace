@@ -1,0 +1,149 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resume & LinkedIn Checker</title>
+<style>
+:root{--ink:#172033;--muted:#667085;--line:#e5eaf2;--primary:#4f46e5}
+*{box-sizing:border-box}
+body{margin:0;background:#f4f7fb;color:var(--ink);font-family:system-ui,Segoe UI,Arial,sans-serif}
+header{background:#111827;color:#fff;padding:26px max(20px,calc((100% - 1050px)/2))}
+.eyebrow{color:#c7d2fe;text-transform:uppercase;letter-spacing:.12em;font-size:12px;font-weight:700}
+h1{margin:8px 0;font-size:clamp(24px,4vw,34px)}
+header p{color:#d1d5db;line-height:1.5;margin:0}
+main{max-width:1050px;margin:28px auto;padding:0 18px;display:grid;grid-template-columns:1fr .85fr;gap:22px}
+.card{background:white;border:1px solid var(--line);border-radius:18px;padding:25px;box-shadow:0 8px 28px #1720330a}
+h2{font-size:19px;margin:0 0 8px}
+.sub{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 20px}
+label{display:block;font-weight:650;font-size:14px;margin:18px 0 8px}
+input{width:100%;border:1px solid #d0d5dd;border-radius:10px;padding:13px;background:white}
+input:focus{outline:3px solid #c7d2fe;border-color:var(--primary)}
+.drop{border:1px dashed #a5b4fc;background:#f8faff;padding:14px;border-radius:12px}
+.help{font-size:12px;color:var(--muted);margin-top:7px}
+button{width:100%;border:0;border-radius:10px;background:var(--primary);color:white;font-weight:700;padding:14px;margin-top:22px;cursor:pointer;font-size:15px}
+.notice{border-radius:10px;padding:12px;margin:12px 0;font-size:13px;background:#f8fafc;color:#475467;overflow-wrap:anywhere}
+.error{background:#fef3f2;color:#b42318}
+.good{background:#ecfdf3;color:#067647}
+ul{padding-left:20px;color:#475467;line-height:1.9;font-size:14px}
+.pill{display:inline-block;border-radius:99px;background:#eef2ff;color:#4338ca;padding:5px 10px;font-size:12px;font-weight:700}
+dl{display:grid;grid-template-columns:115px 1fr;gap:10px;font-size:14px}
+dt{color:var(--muted)}
+dd{margin:0;overflow-wrap:anywhere}
+.json{white-space:pre-wrap;overflow-wrap:anywhere;background:#101828;color:#e5e7eb;border-radius:12px;padding:14px;font-size:12px;max-height:280px;overflow:auto}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:0 15px 25px}
+@media(max-width:720px){main{grid-template-columns:1fr}.card{padding:20px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="eyebrow">Candidate screening utility</div>
+  <h1>Resume & LinkedIn Consistency Checker</h1>
+  <p>Extract candidate details from a resume, check LinkedIn URL consistency, and save results to MySQL.</p>
+</header>
+
+<main>
+<section class="card">
+  <h2>Submit a resume</h2>
+  <p class="sub">PDF, DOCX or TXT · Maximum 8 MB</p>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+      <div class="notice {{ cat }}">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <form action="/analyze" method="post" enctype="multipart/form-data">
+    <label for="resume">Resume file *</label>
+    <div class="drop">
+      <input id="resume" name="resume" type="file" accept=".pdf,.docx,.txt" required>
+      <div class="help">Text-based PDFs supported. Scanned PDFs require OCR.</div>
+    </div>
+
+    <label for="linkedin_url">LinkedIn profile URL</label>
+    <input id="linkedin_url" name="linkedin_url" type="url"
+           placeholder="https://www.linkedin.com/in/your-profile">
+    <div class="help">Checks URL format and presence in the resume, not identity or ownership.</div>
+    <button type="submit">Analyze resume</button>
+  </form>
+</section>
+
+<aside class="card">
+  <h2>What gets checked</h2>
+  <p class="sub">Candidate data extraction and consistency review.</p>
+  <ul>
+    <li>Name, email and phone</li>
+    <li>Skills, education and experience</li>
+    <li>LinkedIn URL formatting and resume consistency</li>
+    <li>Save parsed information in MySQL</li>
+  </ul>
+  <div class="notice good">
+    Uploaded files are deleted after processing. Extracted text and parsed fields are stored in MySQL.
+  </div>
+
+  {% if result %}
+    <h2>Analysis result</h2>
+
+    {% if result.get('success') %}
+      <p><span class="pill">Resume parsed successfully</span></p>
+
+      <dl>
+        <dt>Candidate</dt>
+        <dd>{{ result.get('candidate', {}).get('full_name') or 'Not detected' }}</dd>
+
+        <dt>Email</dt>
+        <dd>{{ result.get('candidate', {}).get('email') or 'Not detected' }}</dd>
+
+        <dt>Phone</dt>
+        <dd>{{ result.get('candidate', {}).get('phone') or 'Not detected' }}</dd>
+
+        <dt>Skills</dt>
+        <dd>{{ (result.get('candidate', {}).get('skills') or [])|join(', ') or 'None detected' }}</dd>
+
+        <dt>LinkedIn format</dt>
+        <dd>
+          {% if result.get('linkedin_check', {}).get('format_valid') %}
+            Valid
+          {% else %}
+            Invalid or missing
+          {% endif %}
+        </dd>
+
+        <dt>Found in CV</dt>
+        <dd>
+          {% if result.get('linkedin_check', {}).get('url_appears_in_resume') %}
+            Yes
+          {% else %}
+            No — review manually
+          {% endif %}
+        </dd>
+
+        <dt>MySQL status</dt>
+        <dd>
+          {% if result.get('database', {}).get('saved') %}
+            <span style="color:#067647">Saved · Candidate ID {{ result.get('database', {}).get('candidate_id') }}</span>
+          {% else %}
+            <span style="color:#b42318">Not saved — check MySQL connection and credentials.</span>
+          {% endif %}
+        </dd>
+      </dl>
+    {% else %}
+      <div class="notice error">
+        {{ result.get('error', 'Resume processing failed.') }}
+      </div>
+    {% endif %}
+
+    <details>
+      <summary style="cursor:pointer;margin:16px 0">Full JSON response</summary>
+      <div class="json">{{ result|tojson(indent=2) }}</div>
+    </details>
+  {% else %}
+    <div class="notice">Parsed details and database status will appear here after submission.</div>
+  {% endif %}
+</aside>
+</main>
+
+<footer>Assessment prototype · Review extracted information before making hiring decisions.</footer>
+</body>
+</html>
