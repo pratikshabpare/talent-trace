@@ -18,3 +18,4 @@ Flow: browser form -> Flask file upload -> PDF/DOCX/TXT text extraction -> exist
 Test webhook is one-shot; click Listen for test event before each test. Text-based PDFs are supported; scanned PDFs require OCR. LinkedIn check is format/consistency only, not profile scraping or identity verification. This is a local assessment prototype; add authentication, CSRF protection, rate limiting, and a retention policy before public deployment. The uploaded file is deleted after processing, but extracted text is stored in MySQL. Never commit API keys into workflow JSON.
 # talent-trace
 # profilesync-ai
+# profilesync-ai
