@@ -48,10 +48,12 @@ app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt"}
 
+# For testing, start "Listen for test event" in the n8n Webhook node first.
+# For production, activate the workflow and use /webhook/resume-profile-check.
 N8N_WEBHOOK_URL = os.getenv(
     "N8N_WEBHOOK_URL",
-    "http://localhost:5678/webhook/resume-profile-check"
-)
+    "http://localhost:5678/webhook-test/resume-profile-check"
+).strip()
 
 # The database name and table name are different.
 MYSQL_DATABASE = os.getenv(
@@ -66,22 +68,19 @@ MYSQL_TABLE = "candidates_new"
 # 2. MYSQL CONNECTION
 # ============================================================
 
-def get_db_connection():
-    """
-    Connect to the MySQL database using environment variables.
 
-    MYSQL_DATABASE = database name
-    MYSQL_TABLE    = table name used by this application
-    """
+def get_db_connection():
+    """Connect to the local MySQL database."""
 
     return mysql.connector.connect(
         host=os.getenv("MYSQL_HOST", "localhost"),
         port=int(os.getenv("MYSQL_PORT", "3306")),
-        user=os.getenv("MYSQL_USER", "resume_app"),
-        password=os.getenv("MYSQL_PASSWORD", ""),
+        user=os.getenv("MYSQL_USER", "root"),
+        password=os.getenv("MYSQL_PASSWORD", "pratik"),
         database=MYSQL_DATABASE,
         connection_timeout=10
     )
+
 
 
 # ============================================================
@@ -127,6 +126,25 @@ def serialize_json(value):
         value if value is not None else [],
         ensure_ascii=False
     )
+
+
+def normalize_bool(value):
+    """Safely normalize booleans returned by n8n/Gemini.
+
+    Strings such as "false", "no", and "0" must not become True.
+    Unknown or missing values return None.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    return None
 
 
 def find_existing_column(actual_columns, possible_names):
@@ -243,21 +261,15 @@ def save_candidate(candidate, linkedin_check, filename):
             ),
 
             "linkedin_format_valid": (
-                bool(format_valid)
-                if format_valid is not None
-                else None
+                normalize_bool(format_valid)
             ),
 
             "linkedin_found_in_resume": (
-                bool(found_in_resume)
-                if found_in_resume is not None
-                else None
+                normalize_bool(found_in_resume)
             ),
 
             "url_appears_in_resume": (
-                bool(found_in_resume)
-                if found_in_resume is not None
-                else None
+                normalize_bool(found_in_resume)
             ),
 
             "resume_filename": filename,
@@ -554,19 +566,50 @@ def analyze():
             result=result
         )
 
-    except requests.RequestException:
-        app.logger.exception("n8n request failed")
+    except requests.HTTPError as exc:
+        response = exc.response
+        status_code = response.status_code if response is not None else 502
+        response_body = (
+            response.text[:1000] if response is not None else str(exc)
+        )
+
+        app.logger.error(
+            "n8n returned HTTP %s for %s. Response: %s",
+            status_code,
+            N8N_WEBHOOK_URL,
+            response_body
+        )
+
+        if status_code == 404:
+            message = (
+                "n8n returned 404: the webhook is not registered. "
+                "For testing, start 'Listen for test event' and use "
+                "/webhook-test/resume-profile-check. For production, "
+                "activate the workflow and use /webhook/resume-profile-check."
+            )
+        else:
+            message = (
+                f"n8n returned HTTP {status_code}. "
+                "Check the n8n execution details and Flask terminal."
+            )
+
+        flash(message, "error")
+        return render_template("index.html", result=None), 502
+
+    except requests.RequestException as exc:
+        app.logger.exception(
+            "Could not connect to n8n at %s: %s",
+            N8N_WEBHOOK_URL,
+            exc
+        )
 
         flash(
-            "Could not reach n8n. Check that the workflow "
-            "is running and the webhook URL is correct.",
+            "Could not connect to n8n. Confirm that n8n is running "
+            "and N8N_WEBHOOK_URL points to the correct host and port.",
             "error"
         )
 
-        return render_template(
-            "index.html",
-            result=None
-        ), 502
+        return render_template("index.html", result=None), 502
 
     except mysql.connector.Error:
         app.logger.exception("MySQL operation failed")
